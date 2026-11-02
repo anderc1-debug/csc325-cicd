@@ -13,3 +13,9 @@ def hello(request):
     """Greets the caller. Optional ?name= query parameter."""
     name = request.query_params.get("name", "world")
     return Response({"message": f"Hello, {name}!", "course": "CSC 325"})
+
+
+@api_view(["GET"])
+def version(request):
+    """Reports the deployed app version."""
+    return Response({"version": "1.1.0", "author": "Rory Anderson"})
