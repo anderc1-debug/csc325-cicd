@@ -1,0 +1,96 @@
+name: CSC325 CI/CD
+
+# Trigger: every push to main runs the full pipeline.
+# Pull requests into main run Setup -> Dependencies -> Test (no Deploy),
+# so the ruleset on main can require the Test check before merging.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ---------- Stage 1: Setup ----------
+  setup:
+    name: Setup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Show environment
+        run: |
+          python --version
+          echo "Commit: ${{ github.sha }}"
+          echo "Message: ${{ github.event.head_commit.message }}"
+
+  # ---------- Stage 2: Dependencies ----------
+  dependencies:
+    name: Dependencies
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip check
+          pip list
+
+  # ---------- Stage 3: Test ----------
+  test:
+    name: Test
+    needs: dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install packages
+        run: pip install -r requirements.txt
+
+      # Any failing test returns a non-zero exit code, which fails this job
+      # and stops the pipeline before Deploy.
+      - name: Run test suite
+        run: python manage.py test --verbosity 2
+
+  # ---------- Stage 4: Deploy ----------
+  deploy:
+    name: Deploy
+    needs: test   # cannot start until Test succeeds
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy application
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          echo "Deploying commit ${{ github.sha }} to production..."
+          if [ -n "$RENDER_DEPLOY_HOOK" ]; then
+            curl -fsS -X POST "$RENDER_DEPLOY_HOOK"
+            echo ""
+            echo "Render deploy triggered."
+          else
+            echo "No RENDER_DEPLOY_HOOK secret set; echo-only deploy."
+          fi
+          echo "Deployed successfully. App URL: ${APP_URL:-not configured}"
